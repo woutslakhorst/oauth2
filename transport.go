@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -25,6 +26,10 @@ type Transport struct {
 	// Base is the base RoundTripper used to make HTTP requests.
 	// If nil, http.DefaultTransport is used.
 	Base http.RoundTripper
+
+	// KeyProvider allows the Transport to attach a DPoP proof when
+	// the token type is DPoP.
+	KeyProvider KeyProvider
 }
 
 // RoundTrip authorizes and authenticates the request with an
@@ -49,6 +54,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	req2 := req.Clone(req.Context())
 	token.SetAuthHeader(req2)
+	if strings.EqualFold(token.Type(), "DPoP") && t.KeyProvider != nil {
+		if proof, err := dpopProof(req2.Method, req2.URL.String(), t.KeyProvider); err == nil {
+			req2.Header.Set("DPoP", proof)
+		}
+	}
 
 	// req.Body is assumed to be closed by the base RoundTripper.
 	reqBodyClosed = true

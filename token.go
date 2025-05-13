@@ -71,6 +71,9 @@ func (t *Token) Type() string {
 	if strings.EqualFold(t.TokenType, "bearer") {
 		return "Bearer"
 	}
+	if strings.EqualFold(t.TokenType, "dpop") {
+		return "DPoP"
+	}
 	if strings.EqualFold(t.TokenType, "mac") {
 		return "MAC"
 	}
@@ -172,7 +175,12 @@ func tokenFromInternal(t *internal.Token) *Token {
 // This token is then mapped from *internal.Token into an *oauth2.Token which is returned along
 // with an error.
 func retrieveToken(ctx context.Context, c *Config, v url.Values) (*Token, error) {
-	tk, err := internal.RetrieveToken(ctx, c.ClientID, c.ClientSecret, c.Endpoint.TokenURL, v, internal.AuthStyle(c.Endpoint.AuthStyle), c.authStyleCache.Get())
+	var proof string
+	if c.supportsDPoP(ctx) {
+		v.Set("token_type", "DPoP")
+		proof, _ = dpopProof("POST", c.Endpoint.TokenURL, c.KeyProvider)
+	}
+	tk, err := internal.RetrieveToken(ctx, c.ClientID, c.ClientSecret, c.Endpoint.TokenURL, v, internal.AuthStyle(c.Endpoint.AuthStyle), c.authStyleCache.Get(), proof)
 	if err != nil {
 		if rErr, ok := err.(*internal.RetrieveError); ok {
 			return nil, (*RetrieveError)(rErr)

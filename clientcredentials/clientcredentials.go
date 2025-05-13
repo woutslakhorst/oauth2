@@ -15,10 +15,13 @@ package clientcredentials // import "golang.org/x/oauth2/clientcredentials"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/internal"
@@ -47,6 +50,13 @@ type Config struct {
 	// client ID & client secret sent. The zero value means to
 	// auto-detect.
 	AuthStyle oauth2.AuthStyle
+
+	// KeyProvider enables DPoP support when the authorization server
+	// advertises it.
+	KeyProvider oauth2.KeyProvider
+
+	dpopOnce      sync.Once
+	dpopSupported bool
 
 	// authStyleCache caches which auth style to use when Endpoint.AuthStyle is
 	// the zero value (AuthStyleAutoDetect).
@@ -89,6 +99,52 @@ type tokenSource struct {
 	conf *Config
 }
 
+func (c *Config) supportsDPoP(ctx context.Context) bool {
+	if c.KeyProvider == nil {
+		return false
+	}
+	c.dpopOnce.Do(func() {
+		c.dpopSupported = serverSupportsDPoP(ctx, c.TokenURL)
+	})
+	return c.dpopSupported
+}
+
+var dpopCache sync.Map
+
+func serverSupportsDPoP(ctx context.Context, tokenURL string) bool {
+	u, err := url.Parse(tokenURL)
+	if err != nil {
+		return false
+	}
+	key := u.Scheme + "://" + u.Host
+	if v, ok := dpopCache.Load(key); ok {
+		return v.(bool)
+	}
+	paths := []string{"/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"}
+	for _, p := range paths {
+		metaURL := key + p
+		req, _ := http.NewRequestWithContext(ctx, "GET", metaURL, nil)
+		res, err := internal.ContextClient(ctx).Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			continue
+		}
+		var m struct {
+			Algs []string `json:"dpop_signing_alg_values_supported"`
+		}
+		if json.Unmarshal(body, &m) == nil && len(m.Algs) > 0 {
+			dpopCache.Store(key, true)
+			return true
+		}
+	}
+	dpopCache.Store(key, false)
+	return false
+}
+
 // Token refreshes the token by using a new client credentials request.
 // tokens received this way do not include a refresh token
 func (c *tokenSource) Token() (*oauth2.Token, error) {
@@ -107,7 +163,12 @@ func (c *tokenSource) Token() (*oauth2.Token, error) {
 		v[k] = p
 	}
 
-	tk, err := internal.RetrieveToken(c.ctx, c.conf.ClientID, c.conf.ClientSecret, c.conf.TokenURL, v, internal.AuthStyle(c.conf.AuthStyle), c.conf.authStyleCache.Get())
+	var proof string
+	if c.conf.supportsDPoP(c.ctx) {
+		v.Set("token_type", "DPoP")
+		proof, _ = dpopProof("POST", c.conf.TokenURL, c.conf.KeyProvider)
+	}
+	tk, err := internal.RetrieveToken(c.ctx, c.conf.ClientID, c.conf.ClientSecret, c.conf.TokenURL, v, internal.AuthStyle(c.conf.AuthStyle), c.conf.authStyleCache.Get(), proof)
 	if err != nil {
 		if rErr, ok := err.(*internal.RetrieveError); ok {
 			return nil, (*oauth2.RetrieveError)(rErr)

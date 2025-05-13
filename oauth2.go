@@ -59,6 +59,13 @@ type Config struct {
 	// Scopes specifies optional requested permissions.
 	Scopes []string
 
+	// KeyProvider enables DPoP support if the authorization server
+	// advertises DPoP in its metadata.
+	KeyProvider KeyProvider
+
+	dpopOnce      sync.Once
+	dpopSupported bool
+
 	// authStyleCache caches which auth style to use when Endpoint.AuthStyle is
 	// the zero value (AuthStyleAutoDetect).
 	authStyleCache internal.LazyAuthStyleCache
@@ -240,6 +247,16 @@ func (c *Config) Exchange(ctx context.Context, code string, opts ...AuthCodeOpti
 // The returned client and its Transport should not be modified.
 func (c *Config) Client(ctx context.Context, t *Token) *http.Client {
 	return NewClient(ctx, c.TokenSource(ctx, t))
+}
+
+func (c *Config) supportsDPoP(ctx context.Context) bool {
+	if c.KeyProvider == nil {
+		return false
+	}
+	c.dpopOnce.Do(func() {
+		c.dpopSupported = serverSupportsDPoP(ctx, c.Endpoint.TokenURL)
+	})
+	return c.dpopSupported
 }
 
 // TokenSource returns a [TokenSource] that returns t until t expires,

@@ -212,7 +212,7 @@ func cloneURLValues(v url.Values) url.Values {
 	return v2
 }
 
-func RetrieveToken(ctx context.Context, clientID, clientSecret, tokenURL string, v url.Values, authStyle AuthStyle, styleCache *AuthStyleCache) (*Token, error) {
+func RetrieveToken(ctx context.Context, clientID, clientSecret, tokenURL string, v url.Values, authStyle AuthStyle, styleCache *AuthStyleCache, dpopProof string) (*Token, error) {
 	needsAuthStyleProbe := authStyle == AuthStyleUnknown
 	if needsAuthStyleProbe {
 		if style, ok := styleCache.lookupAuthStyle(tokenURL, clientID); ok {
@@ -225,6 +225,9 @@ func RetrieveToken(ctx context.Context, clientID, clientSecret, tokenURL string,
 	req, err := newTokenRequest(tokenURL, clientID, clientSecret, v, authStyle)
 	if err != nil {
 		return nil, err
+	}
+	if dpopProof != "" {
+		req.Header.Set("DPoP", dpopProof)
 	}
 	token, err := doTokenRoundTrip(ctx, req)
 	if err != nil && needsAuthStyleProbe {
@@ -242,6 +245,9 @@ func RetrieveToken(ctx context.Context, clientID, clientSecret, tokenURL string,
 		// So just try both ways.
 		authStyle = AuthStyleInParams // the second way we'll try
 		req, _ = newTokenRequest(tokenURL, clientID, clientSecret, v, authStyle)
+		if dpopProof != "" {
+			req.Header.Set("DPoP", dpopProof)
+		}
 		token, err = doTokenRoundTrip(ctx, req)
 	}
 	if needsAuthStyleProbe && err == nil {

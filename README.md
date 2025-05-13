@@ -33,3 +33,26 @@ Note:
 * Excluding trivial changes, all contributions should be connected to an existing issue.
 * API changes must go through the [change proposal process](https://go.dev/s/proposal-process) before they can be accepted.
 * The code owners are listed at [dev.golang.org/owners](https://dev.golang.org/owners#:~:text=x/oauth2).
+
+### Using DPoP
+
+To request and use [DPoP](https://www.rfc-editor.org/rfc/rfc9449) bound tokens,
+configure a `KeyProvider` on your `Config`. When the authorization server
+advertises DPoP support in its metadata, token requests will include the
+appropriate proof and returned tokens will be used with DPoP headers. This
+library includes `RSAKeyProvider` and `ECKeyProvider` helpers:
+
+```go
+// RSA or EC private keys can be used.
+key, _ := internal.ParseKey([]byte(privatePEM))
+kp := &oauth2.RSAKeyProvider{Key: key}
+conf := &oauth2.Config{
+    ClientID:     "client-id",
+    ClientSecret: "secret",
+    Endpoint: oauth2.Endpoint{TokenURL: "https://auth.example.com/token"},
+    KeyProvider:  kp,
+}
+
+tok, err := conf.Token(context.Background())
+client := conf.Client(context.Background(), tok)
+```
